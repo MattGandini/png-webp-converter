@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CoPack — PNG → WEBP Converter</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    :root{
+      --brand:#0927eb;          /* CoPack blue */
+      --brand-50:#eef1ff;
+      --brand-100:#e0e5ff;
+      --brand-600:#0b22c5;
+      --brand-700:#081aa3;
+    }
+    html{scroll-behavior:smooth}
+    .dropzone{border:2px dashed var(--brand); background:var(--brand-50)}
+    .btn-brand{background:var(--brand); color:#fff}
+    .btn-brand:hover{background:var(--brand-600)}
+    .btn-green{background:#16a34a; color:#fff}
+    .btn-green:hover{background:#15803d}
+    .link-brand{color:var(--brand)}
+    .accent-brand{accent-color:var(--brand)}
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <main class="max-w-4xl mx-auto p-6">
+    <header class="mb-6 flex items-center gap-4">
+      <!-- LOGO AREA: sostituisci l'SVG con <img src="/percorso/al/tuo/logo.svg" alt="CoPack" class="h-10"> -->
+      <div class="h-10 w-28 flex items-center justify-center select-none" title="CoPack">
+        <svg viewBox="0 0 180 36" class="h-10" aria-hidden="true">
+          <defs>
+            <linearGradient id="g" x1="0" x2="1">
+              <stop stop-color="#0927eb" offset="0"/>
+              <stop stop-color="#081aa3" offset="1"/>
+            </linearGradient>
+          </defs>
+          <text x="0" y="26" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-weight="700" font-size="26" fill="url(#g)">CoPack</text>
+        </svg>
+      </div>
+      <div class="flex-1">
+        <h1 class="text-xl font-semibold" style="color:var(--brand)">PNG → WEBP Converter</h1>
+        <p class="text-sm text-gray-600">Converte PNG (anche trasparenti) in WEBP, tutto <strong>client‑side</strong>. Nessun upload.</p>
+      </div>
+    </header>
+
+    <section class="bg-white rounded-2xl shadow-sm p-5 space-y-4">
+      <div class="grid md:grid-cols-3 gap-4">
+        <div class="md:col-span-2">
+          <label class="block text-sm text-gray-700 mb-2">Seleziona i file PNG</label>
+          <input id="fileInput" type="file" accept="image/png" multiple class="w-full" />
+          <div id="drop" class="dropzone rounded-xl mt-3 p-6 text-center text-gray-800">
+            Trascina qui i tuoi PNG (multi‑file)
+          </div>
+        </div>
+        <div class="space-y-3">
+          <label class="block">
+            <span class="text-sm text-gray-700">Qualità WEBP (0.1–1.0)</span>
+            <input id="quality" type="number" min="0.1" max="1" step="0.05" value="0.85" class="mt-1 w-full rounded-xl border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+          </label>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input id="rename" type="checkbox" class="form-checkbox accent-brand" checked>
+            <span>Aggiungi suffisso <code>-webp</code> al nome</span>
+          </label>
+          <button id="btnAll" class="w-full px-3 py-2 rounded-xl btn-brand disabled:opacity-50" disabled>Converti tutto (ZIP)</button>
+        </div>
+      </div>
+
+      <div id="list" class="mt-4 grid md:grid-cols-2 gap-4"></div>
+
+      <p id="support" class="text-sm mt-1"></p>
+    </section>
+
+    <footer class="mt-6 text-xs text-gray-500">
+      <p>Nota: la conversione via Canvas preserva il canale alpha. Per <em>lossless</em> al 100% possiamo integrare un encoder WebP WASM (es. libwebp) in una versione Pro.</p>
+    </footer>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    const $ = (s, root=document) => root.querySelector(s);
+    const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
+    const el = {
+      file: $("#fileInput"),
+      drop: $("#drop"),
+      list: $("#list"),
+      q: $("#quality"),
+      rename: $("#rename"),
+      btnAll: $("#btnAll"),
+      support: $("#support")
+    };
+
+    function webpSupported(){
+      const c = document.createElement('canvas');
+      if(!c.getContext) return false;
+      const data = c.toDataURL('image/webp');
+      return data.startsWith('data:image/webp');
+    }
+
+    function human(n){ if(n<1024) return n+" B"; if(n<1048576) return (n/1024).toFixed(1)+" KB"; return (n/1048576).toFixed(2)+" MB"; }
+
+    function notify(msg, err=false){
+      const n = document.createElement('div');
+      n.className = `fixed left-1/2 -translate-x-1/2 bottom-6 px-4 py-2 rounded-xl shadow ${err? 'bg-red-600':'bg-green-600'} text-white`;
+      n.textContent = msg; document.body.appendChild(n); setTimeout(()=>n.remove(),2200);
+    }
+
+    function setupSupport(){
+      el.support.innerHTML = webpSupported()
+        ? '<span class="text-green-700">Il tuo browser supporta WebP ✅</span>'
+        : '<span class="text-red-700">Il tuo browser NON supporta WebP ❌ — usa Chrome/Edge/Firefox/Safari recenti.</span>';
+    }
+
+    function onFiles(files){
+      const arr = Array.from(files).filter(f=>/image\/png/i.test(f.type));
+      if(arr.length===0){ notify('Seleziona file .png', true); return; }
+      arr.forEach(addItem); el.btnAll.disabled = el.list.children.length===0;
+    }
+
+    function addItem(file){
+      const card = document.createElement('div');
+      card.className = "bg-gray-50 rounded-xl p-4 flex gap-4 items-center";
+      card.innerHTML = `
+        <div class="w-24 h-24 bg-white rounded-lg overflow-hidden flex items-center justify-center">
+          <img alt="anteprima" class="max-w-full max-h-full" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium truncate" title="${file.name}">${file.name}</div>
+          <div class="text-xs text-gray-500">Originale: ${human(file.size)}</div>
+          <div class="text-xs text-gray-500 converted hidden">WEBP: <span class="size">—</span></div>
+          <div class="text-xs text-gray-500 mt-1 status">Pronto</div>
+        </div>
+        <div class="flex flex-col gap-2">
+          <button class="px-3 py-1 rounded-lg btn-brand btn-convert">Converti</button>
+          <a class="px-3 py-1 rounded-lg btn-green btn-dl hidden">Download</a>
+        </div>`;
+      const img = $("img", card);
+      const fr = new FileReader(); fr.onload = e => img.src = e.target.result; fr.readAsDataURL(file);
+      const statusEl = $(".status", card);
+      const convertedRow = $(".converted", card);
+      const sizeOut = $(".converted .size", card);
+      const btnC = $(".btn-convert", card);
+      const btnD = $(".btn-dl", card);
+
+      btnC.addEventListener('click', async ()=>{
+        try{
+          statusEl.textContent = 'Conversione…'; btnC.disabled = true;
+          const blob = await convertPNGtoWEBP(file, parseFloat(el.q.value || '0.85'));
+          sizeOut.textContent = human(blob.size);
+          convertedRow.classList.remove('hidden');
+          const url = URL.createObjectURL(blob);
+          btnD.href = url;
+          const name = file.name.replace(/\.png$/i, (el.rename.checked? '-webp':'') + '.webp');
+          btnD.download = name; btnD.classList.remove('hidden');
+          statusEl.textContent = 'Fatto ✓';
+        }catch(err){ console.error(err); statusEl.textContent = 'Errore'; notify('Errore nella conversione', true); btnC.disabled = false; }
+      });
+
+      el.list.appendChild(card);
+    }
+
+    async function loadBitmap(file){
+      if('createImageBitmap' in window){
+        return await createImageBitmap(file);
+      }
+      // Fallback per browser senza createImageBitmap
+      const url = URL.createObjectURL(file);
+      const img = new Image(); img.decoding = 'async'; img.src = url; await img.decode();
+      return img; // ha width/height e può essere disegnato su canvas
+    }
+
+    async function convertPNGtoWEBP(file, quality=0.85){
+      const bmp = await loadBitmap(file);
+      const w = bmp.width, h = bmp.height;
+      if(typeof OffscreenCanvas !== 'undefined' && 'convertToBlob' in OffscreenCanvas.prototype){
+        const canvas = new OffscreenCanvas(w,h);
+        const ctx = canvas.getContext('2d', {alpha:true});
+        ctx.clearRect(0,0,w,h); ctx.drawImage(bmp,0,0);
+        const blob = await canvas.convertToBlob({ type:'image/webp', quality });
+        if('close' in bmp) try{bmp.close()}catch{}; return blob;
+      }
+      // Fallback: canvas DOM + toBlob
+      const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+      const ctx = canvas.getContext('2d', {alpha:true});
+      ctx.clearRect(0,0,w,h); ctx.drawImage(bmp,0,0);
+      const blob = await new Promise((res, rej)=> canvas.toBlob(b=> b? res(b): rej(new Error('toBlob fallita')), 'image/webp', quality));
+      return blob;
+    }
+
+    async function convertAllToZip(){
+      const cards = $$(".bg-gray-50.rounded-xl.p-4"); if(cards.length===0) return;
+      el.btnAll.disabled = true; const zip = new JSZip(); let done=0;
+      const filesByName = new Map(Array.from(el.file.files).map(f=>[f.name,f]));
+      for(const card of cards){
+        const name = $(".text-sm.font-medium", card).getAttribute('title');
+        const statusEl = $(".status", card);
+        const f = filesByName.get(name); if(!f) continue;
+        statusEl.textContent = 'Conversione…';
+        const blob = await convertPNGtoWEBP(f, parseFloat(el.q.value || '0.85'));
+        const outName = name.replace(/\.png$/i, (el.rename.checked? '-webp':'') + '.webp');
+        zip.file(outName, blob); statusEl.textContent = 'Fatto ✓'; done++;
+      }
+      const zipBlob = await zip.generateAsync({type:'blob'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(zipBlob); a.download = 'converted-webp.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      el.btnAll.disabled = false; notify(`Convertiti ${done} file`);
+    }
+
+    function setupDnD(){
+      const dz = el.drop;
+      ['dragenter','dragover'].forEach(evt=> dz.addEventListener(evt, e=>{ e.preventDefault(); dz.style.background = 'var(--brand-100)'; }));
+      ['dragleave','drop'].forEach(evt=> dz.addEventListener(evt, e=>{ e.preventDefault(); dz.style.background = 'var(--brand-50)'; }));
+      dz.addEventListener('drop', e=>{
+        onFiles(e.dataTransfer.files);
+        const dt = new DataTransfer();
+        const keep = Array.from(el.file.files);
+        for(const f of keep) dt.items.add(f);
+        for(const f of e.dataTransfer.files) if(/image\/png/i.test(f.type)) dt.items.add(f);
+        el.file.files = dt.files;
+      });
+    }
+
+    function init(){
+      setupSupport();
+      el.file.addEventListener('change', e=> onFiles(e.target.files));
+      setupDnD();
+      el.btnAll.addEventListener('click', convertAllToZip);
+    }
+    init();
+  </script>
+</body>
+</html>
