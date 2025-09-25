@@ -27,11 +27,16 @@
   <main class="max-w-4xl mx-auto p-6">
     <header class="mb-6 flex items-center gap-4">
       <!-- LOGO AREA: sostituisci l'SVG con <img src="/percorso/al/tuo/logo.svg" alt="CoPack" class="h-10"> -->
-      <div class="h-30 w-30 flex items-center justify-center select-none" title="CoPack">
-        <div class="h-30 flex items-center">
-  <img src="copack-logo-square.png" alt="CoPack" class="h-30" />
-</div>
-
+      <div class="h-10 w-28 flex items-center justify-center select-none" title="CoPack">
+        <svg viewBox="0 0 180 36" class="h-10" aria-hidden="true">
+          <defs>
+            <linearGradient id="g" x1="0" x2="1">
+              <stop stop-color="#0927eb" offset="0"/>
+              <stop stop-color="#081aa3" offset="1"/>
+            </linearGradient>
+          </defs>
+          <text x="0" y="26" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-weight="700" font-size="26" fill="url(#g)">CoPack</text>
+        </svg>
       </div>
       <div class="flex-1">
         <h1 class="text-xl font-semibold" style="color:var(--brand)">PNG → WEBP Converter</h1>
@@ -122,8 +127,8 @@
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium truncate" title="${file.name}">${file.name}</div>
           <div class="text-xs text-gray-500">Originale: ${human(file.size)}</div>
-          <div class="text-xs text-gray-500 converted hidden">WEBP: <span class="size">—</span></div>
-          <div class="text-xs text-gray-500 mt-1 status">Pronto</div>
+          $1<div class="text-xs text-gray-700 saving hidden">Valore generato: <span class="pct">—</span>% <span class="ml-1 text-gray-500">(−<span class="saved">—</span>)</span></div>
+          $2
         </div>
         <div class="flex flex-col gap-2">
           <button class="px-3 py-1 rounded-lg btn-brand btn-convert">Converti</button>
@@ -134,6 +139,9 @@
       const statusEl = $(".status", card);
       const convertedRow = $(".converted", card);
       const sizeOut = $(".converted .size", card);
+      const savingRow = $(".saving", card);
+      const pctOut = $(".saving .pct", card);
+      const savedOut = $(".saving .saved", card);
       const btnC = $(".btn-convert", card);
       const btnD = $(".btn-dl", card);
 
@@ -143,6 +151,12 @@
           const blob = await convertPNGtoWEBP(file, parseFloat(el.q.value || '0.85'));
           sizeOut.textContent = human(blob.size);
           convertedRow.classList.remove('hidden');
+          // Valore generato: risparmio e percentuale
+          const savedBytes = Math.max(0, file.size - blob.size);
+          const pct = file.size > 0 ? (savedBytes / file.size) * 100 : 0;
+          savedOut.textContent = human(savedBytes);
+          pctOut.textContent = (Math.round(pct * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
+          savingRow.classList.remove('hidden');
           const url = URL.createObjectURL(blob);
           btnD.href = url;
           const name = file.name.replace(/\.png$/i, (el.rename.checked? '-webp':'') + '.webp');
@@ -192,6 +206,20 @@
         const f = filesByName.get(name); if(!f) continue;
         statusEl.textContent = 'Conversione…';
         const blob = await convertPNGtoWEBP(f, parseFloat(el.q.value || '0.85'));
+        // Aggiorna UI per ogni card anche in batch
+        const convertedRow = $(".converted", card);
+        const sizeOut = $(".converted .size", card);
+        sizeOut.textContent = human(blob.size);
+        convertedRow.classList.remove('hidden');
+        const savingRow = $(".saving", card);
+        const pctOut = $(".saving .pct", card);
+        const savedOut = $(".saving .saved", card);
+        const orig = f.size;
+        const savedBytes = Math.max(0, orig - blob.size);
+        const pct = orig > 0 ? (savedBytes / orig) * 100 : 0;
+        savedOut.textContent = human(savedBytes);
+        pctOut.textContent = (Math.round(pct * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
+        savingRow.classList.remove('hidden');
         const outName = name.replace(/\.png$/i, (el.rename.checked? '-webp':'') + '.webp');
         zip.file(outName, blob); statusEl.textContent = 'Fatto ✓'; done++;
       }
