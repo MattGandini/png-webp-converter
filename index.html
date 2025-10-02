@@ -1,51 +1,300 @@
-async function convertAllToZip(){
-  const cards = $$(".bg-gray-50.rounded-xl.p-4");
-  if(cards.length===0) return;
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PNG/JPEG → WEBP Converter — Toolvinci</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    :root{
+      --brand:#0927eb; --brand-50:#eef1ff; --brand-100:#e0e5ff; --brand-600:#0b22c5;
+    }
+    html{scroll-behavior:smooth}
+    .dropzone{border:2px dashed var(--brand); background:var(--brand-50)}
+    .btn-brand{background:var(--brand); color:#fff}
+    .btn-brand:hover{background:var(--brand-600)}
+    .btn-green{background:#16a34a; color:#fff}
+    .btn-green:hover{background:#15803d}
+    .accent-brand{accent-color:var(--brand)}
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <main class="max-w-4xl mx-auto p-6">
+    <header class="mb-6 flex items-center gap-4">
+      <img src="copack-logo-square.png" alt="CoPack" class="h-12 w-12 rounded-lg bg-white object-contain">
+      <div class="flex-1">
+        <h1 class="text-xl font-semibold" style="color:var(--brand)">PNG/JPEG → WEBP Converter</h1>
+        <p class="text-sm text-gray-600">Conversione <strong>client-side</strong> (privacy), supporto trasparenza per PNG. Nessun upload.</p>
+      </div>
+    </header>
 
-  el.btnAll.disabled = true;
-  const zip = new JSZip();
-  let done = 0;
+    <section class="bg-white rounded-2xl shadow-sm p-5 space-y-4">
+      <div class="grid md:grid-cols-3 gap-4">
+        <div class="md:col-span-2">
+          <label class="block text-sm text-gray-700 mb-2">Seleziona file PNG o JPEG</label>
+          <input id="fileInput" type="file" accept="image/png,image/jpeg" multiple class="w-full" />
+          <div id="drop" class="dropzone rounded-xl mt-3 p-6 text-center text-gray-800">
+            Trascina qui PNG/JPEG (multi-file)
+          </div>
+        </div>
+        <div class="space-y-3">
+          <label class="block">
+            <span class="text-sm text-gray-700">Qualità WEBP (0.1–1.0)</span>
+            <input id="quality" type="number" min="0.1" max="1" step="0.05" value="0.85"
+                   class="mt-1 w-full rounded-xl border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+          </label>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input id="rename" type="checkbox" class="form-checkbox accent-brand" checked>
+            <span>Aggiungi suffisso <code>-webp</code> al nome</span>
+          </label>
+          <button id="btnAll" class="w-full px-3 py-2 rounded-xl btn-brand disabled:opacity-50" disabled>Converti tutto (ZIP)</button>
+        </div>
+      </div>
 
-  for(const card of cards){
-    const statusEl = $(".status", card);
-    const file = card._file;            // <— prendiamo il File dal card
-    if(!file) continue;
+      <div id="list" class="mt-4 grid md:grid-cols-2 gap-4"></div>
+      <p id="support" class="text-sm mt-1"></p>
+    </section>
 
-    statusEl.textContent = 'Conversione…';
-    const blob = await convertToWEBP(file, parseFloat(el.q.value || '0.85'));
+    <footer class="mt-6 text-xs text-gray-500">
+      <p>Per qualità <em>lossless</em> al 100% valuteremo un encoder WebP WASM (versione Pro).</p>
+    </footer>
+  </main>
 
-    // Aggiorna UI per ogni card
-    const convertedRow = $(".converted", card);
-    const sizeOut = $(".converted .size", card);
-    sizeOut.textContent = human(blob.size);
-    convertedRow.classList.remove('hidden');
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    // ---------- Helpers UI ----------
+    const $ = (s, root=document) => root.querySelector(s);
+    const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
+    const el = {
+      file: $("#fileInput"),
+      drop: $("#drop"),
+      list: $("#list"),
+      q: $("#quality"),
+      rename: $("#rename"),
+      btnAll: $("#btnAll"),
+      support: $("#support")
+    };
 
-    const savingRow = $(".saving", card);
-    const pctOut   = $(".saving .pct", card);
-    const savedOut = $(".saving .saved", card);
-    const savedBytes = Math.max(0, file.size - blob.size);
-    const pct = file.size > 0 ? (savedBytes / file.size) * 100 : 0;
-    savedOut.textContent = human(savedBytes);
-    pctOut.textContent = (Math.round(pct * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
-    savingRow.classList.remove('hidden');
+    const items = []; // { file: File, card: HTMLElement }
 
-    // Nome file di output coerente con l’opzione suffisso
-    const outName = makeWebpName(file.name, el.rename.checked);
-    zip.file(outName, blob);
+    function human(n){ if(n<1024) return n+" B"; if(n<1048576) return (n/1024).toFixed(1)+" KB"; return (n/1048576).toFixed(2)+" MB"; }
+    function getQuality(){
+      const raw = (el.q.value || "0.85").replace(',', '.');
+      let q = parseFloat(raw);
+      if(!isFinite(q) || q<=0) q = 0.85;
+      if(q>1) q = 1;
+      return q;
+    }
+    function isValidImage(f){ return /^image\/(png|jpeg)$/i.test(f.type); }
 
-    statusEl.textContent = 'Fatto ✓';
-    done++;
-    await new Promise(r=> setTimeout(r, 0)); // yield UI
-  }
+    function webpSupported(){
+      const c = document.createElement('canvas');
+      if(!c.getContext) return false;
+      return c.toDataURL('image/webp').startsWith('data:image/webp');
+    }
+    function setupSupport(){
+      el.support.innerHTML = webpSupported()
+        ? '<span class="text-green-700">Il tuo browser supporta WebP ✅</span>'
+        : '<span class="text-red-700">Il tuo browser NON supporta WebP ❌ — usa un browser aggiornato.</span>';
+    }
 
-  // Genera e scarica lo ZIP
-  const zipBlob = await zip.generateAsync({type:'blob'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(zipBlob);
-  a.download = 'converted-webp.zip';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=> URL.revokeObjectURL(a.href), 1500);
+    // ---------- UI: aggiunta card ----------
+    function addItem(file){
+      const card = document.createElement('div');
+      card.className = "bg-gray-50 rounded-xl p-4 flex gap-4 items-center";
 
-  el.btnAll.disabled = false;
-  notify(`Convertiti ${done} file`);
-}
+      card.innerHTML = `
+        <div class="w-24 h-24 bg-white rounded-lg overflow-hidden flex items-center justify-center">
+          <img alt="anteprima" class="max-w-full max-h-full" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium truncate" title="${file.name}">${file.name}</div>
+          <div class="text-xs text-gray-500">Originale: ${human(file.size)}</div>
+          <div class="text-xs text-gray-500 converted hidden">WEBP: <span class="size">—</span></div>
+          <div class="text-xs text-gray-700 saving hidden">Valore generato: <span class="pct">—</span>% <span class="ml-1 text-gray-500">(−<span class="saved">—</span>)</span></div>
+          <div class="text-xs text-gray-500 mt-1 status">Pronto</div>
+        </div>
+        <div class="flex flex-col gap-2">
+          <button class="px-3 py-1 rounded-lg btn-brand btn-convert">Converti</button>
+          <a class="px-3 py-1 rounded-lg btn-green btn-dl hidden">Download</a>
+        </div>`;
+
+      // anteprima
+      const img = $("img", card);
+      const fr = new FileReader();
+      fr.onload = e => img.src = e.target.result;
+      fr.readAsDataURL(file);
+
+      // listeners
+      const statusEl    = $(".status", card);
+      const convertedEl = $(".converted", card);
+      const sizeOut     = $(".converted .size", card);
+      const savingRow   = $(".saving", card);
+      const pctOut      = $(".saving .pct", card);
+      const savedOut    = $(".saving .saved", card);
+      const btnC        = $(".btn-convert", card);
+      const btnD        = $(".btn-dl", card);
+
+      btnC.addEventListener('click', async ()=>{
+        try{
+          btnC.disabled = true;
+          statusEl.textContent = 'Conversione…';
+          const blob = await convertToWEBP(file, getQuality());
+          // update UI
+          sizeOut.textContent = human(blob.size);
+          convertedEl.classList.remove('hidden');
+          const saved = Math.max(0, file.size - blob.size);
+          const pct   = file.size ? (saved/file.size)*100 : 0;
+          savedOut.textContent = human(saved);
+          pctOut.textContent   = (Math.round(pct*10)/10).toLocaleString(undefined, {maximumFractionDigits:1});
+          savingRow.classList.remove('hidden');
+          // download link
+          const url = URL.createObjectURL(blob);
+          btnD.href = url;
+          btnD.download = makeWebpName(file.name, el.rename.checked);
+          btnD.classList.remove('hidden');
+          statusEl.textContent = 'Fatto ✓';
+        }catch(err){
+          console.error(err);
+          statusEl.textContent = 'Errore';
+          btnC.disabled = false;
+          alert('Errore nella conversione');
+        }
+      });
+
+      el.list.appendChild(card);
+      items.push({ file, card });
+      el.btnAll.disabled = items.length === 0;
+    }
+
+    // ---------- Conversione ----------
+    function makeWebpName(originalName, addSuffix){
+      const base = originalName.replace(/\.(png|jpe?g)$/i, '');
+      return base + (addSuffix ? '-webp' : '') + '.webp';
+    }
+
+    function canvasToBlob(canvas, type, quality){
+      return new Promise((res, rej)=>{
+        if(canvas.toBlob){
+          canvas.toBlob(b=> b? res(b): rej(new Error('toBlob fallita')), type, quality);
+        }else{
+          // vecchio fallback
+          try{
+            const dataURL = canvas.toDataURL(type, quality);
+            const bin = atob(dataURL.split(',')[1]);
+            const arr = new Uint8Array(bin.length);
+            for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+            res(new Blob([arr], {type}));
+          }catch(e){ rej(e); }
+        }
+      });
+    }
+
+    async function convertToWEBP(file, quality){
+      const bmp = await (async ()=>{
+        if('createImageBitmap' in window){
+          return await createImageBitmap(file);
+        }
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = url;
+        await img.decode();
+        return img;
+      })();
+
+      const w = bmp.width, h = bmp.height;
+      // OffscreenCanvas se disponibile
+      if(typeof OffscreenCanvas !== 'undefined' && 'convertToBlob' in OffscreenCanvas.prototype){
+        const oc = new OffscreenCanvas(w, h);
+        const ctx = oc.getContext('2d', {alpha:true});
+        ctx.clearRect(0,0,w,h); ctx.drawImage(bmp,0,0);
+        const blob = await oc.convertToBlob({ type:'image/webp', quality });
+        if('close' in bmp) try{ bmp.close(); }catch{}
+        return blob;
+      }
+      // Canvas DOM
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d', {alpha:true});
+      ctx.clearRect(0,0,w,h); ctx.drawImage(bmp,0,0);
+      return await canvasToBlob(canvas, 'image/webp', quality);
+    }
+
+    // ---------- Batch ZIP ----------
+    async function convertAllToZip(){
+      if(items.length===0) return;
+      el.btnAll.disabled = true;
+
+      const zip = new JSZip();
+      let done = 0;
+
+      for(const it of items){
+        const { file, card } = it;
+        const statusEl = $(".status", card);
+        statusEl.textContent = 'Conversione…';
+
+        const webp = await convertToWEBP(file, getQuality());
+
+        // aggiorna UI anche nel batch
+        const convertedEl = $(".converted", card);
+        const sizeOut     = $(".converted .size", card);
+        sizeOut.textContent = human(webp.size);
+        convertedEl.classList.remove('hidden');
+
+        const savingRow = $(".saving", card);
+        const pctOut    = $(".saving .pct", card);
+        const savedOut  = $(".saving .saved", card);
+        const saved = Math.max(0, file.size - webp.size);
+        const pct   = file.size ? (saved/file.size)*100 : 0;
+        savedOut.textContent = human(saved);
+        pctOut.textContent   = (Math.round(pct*10)/10).toLocaleString(undefined, {maximumFractionDigits:1});
+        savingRow.classList.remove('hidden');
+
+        zip.file(makeWebpName(file.name, el.rename.checked), webp);
+        statusEl.textContent = 'Fatto ✓';
+        done++;
+        await new Promise(r=> setTimeout(r, 0)); // yield UI
+      }
+
+      const blob = await zip.generateAsync({ type:'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'converted-webp.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=> URL.revokeObjectURL(a.href), 1500);
+
+      el.btnAll.disabled = false;
+    }
+
+    // ---------- Input & DnD ----------
+    function onFiles(files){
+      const arr = Array.from(files).filter(isValidImage);
+      if(arr.length === 0) return;
+      arr.forEach(addItem);
+    }
+
+    function setupDnD(){
+      const dz = el.drop;
+      ['dragenter','dragover'].forEach(evt => dz.addEventListener(evt, e=>{
+        e.preventDefault(); dz.style.background = 'var(--brand-100)';
+      }));
+      ['dragleave','drop'].forEach(evt => dz.addEventListener(evt, e=>{
+        e.preventDefault(); dz.style.background = 'var(--brand-50)';
+      }));
+      dz.addEventListener('drop', e=>{
+        onFiles(e.dataTransfer.files);
+      });
+    }
+
+    // ---------- Init ----------
+    function init(){
+      setupSupport();
+      el.file.addEventListener('change', e=> onFiles(e.target.files));
+      setupDnD();
+      el.btnAll.addEventListener('click', convertAllToZip);
+    }
+    init();
+  </script>
+</body>
+</html>
